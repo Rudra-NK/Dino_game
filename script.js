@@ -1,52 +1,107 @@
-// game.js — Dino clone logic (separate file)
+// game.js — Denser start + stronger (but still small) obstacle increases on level-up
 (() => {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  // use canvas width/height attributes for crisp coordinates
-  const W = canvas.width;
-  const H = canvas.height;
+
+  // ---------- DPI / canvas ----------
+  function resizeCanvasToDisplaySize() {
+    const dpr = window.devicePixelRatio || 1;
+    const displayWidth = Math.max(1, Math.floor(canvas.clientWidth));
+    const displayHeight = Math.max(1, Math.floor(canvas.clientHeight));
+    const width = Math.max(1, Math.floor(displayWidth * dpr));
+    const height = Math.max(1, Math.floor(displayHeight * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  }
+  resizeCanvasToDisplaySize();
+  window.addEventListener('resize', () => {
+    resizeCanvasToDisplaySize();
+    recalcLayout();
+  });
+
+  function CSS_W() { return canvas.clientWidth; }
+  function CSS_H() { return canvas.clientHeight; }
+
+  // ---------- Layout helpers ----------
+  let groundHeight = 40; // css px
+  function groundY() { return CSS_H() - groundHeight; }
+
+  function recalcLayout() {
+    dino.y = Math.min(dino.y, groundY() - dino.h);
+    for (const o of obstacles) {
+      o.y = groundY() - o.h;
+    }
+  }
+
+  // ---------- Camera ----------
+  const CAMERA_OFFSET_X = 80; // dino drawn at this screen x (css px)
+
+  // ---------- DOM elements ----------
   const scoreEl = document.getElementById('score');
   const speedEl = document.getElementById('speed');
   const godStateEl = document.getElementById('godState');
   const restartBtn = document.getElementById('restartBtn');
 
-  // ----- Game settings -----
-  let gameSpeed = 6;
-  let spawnInterval = 90; // frames between obstacles at start
-  let gravity = 0.8;
+  // ---------- Game state ----------
+  const baseSpeed = 5;      // base starting speed
+  let gameSpeed = baseSpeed;      // dino forward speed (css px per frame)
+  let gravity = 0.65;
   let frame = 0;
   let score = 0;
   let running = true;
-
-  // SAFE: local toggle to simulate "invincible"
+  let isPaused = false;
   let godMode = false;
 
-  // ---- Entities ----
-  const groundY = H - 40;
+  // ---------- Tuning: dynamic gap and obstacle-density-with-speed ----------
+  const GAP_BASE = 500;           // base gap in px at baseSpeed
+  const GAP_PER_SPEED = 150;      // extra px added per speed unit above base
+  const GAP_RANDOM_JITTER = 200;  // random jitter range
+  const GAP_MIN = 300;
+  const GAP_MAX = 2000;
+
+  // how speed maps to extra obstacles
+  const SPEED_LEVEL = 1.0;        // lower => obstacles increase sooner with speed (was 1.5)
+  const MAX_EXTRA_OBSTACLES = 6;  // allow a bit more density at high speed
+  const BASE_OBSTACLE_BUFFER = 3;  // base desired number of gaps ahead
+  const INITIAL_EXTRA_OBSTACLES = 4; // increased initial boost (denser beginning)
+
+  function computeGapForSpeed(speed) {
+    const extra = Math.max(0, speed - baseSpeed) * GAP_PER_SPEED;
+    const jitter = Math.floor(Math.random() * GAP_RANDOM_JITTER);
+    let gap = GAP_BASE + extra + jitter;
+    gap = Math.max(GAP_MIN, Math.min(GAP_MAX, gap));
+    return Math.floor(gap);
+  }
+
+  function computeExtraObstacles(speed) {
+    const raw = Math.floor((Math.max(0, speed - baseSpeed)) / SPEED_LEVEL);
+    return Math.min(MAX_EXTRA_OBSTACLES, Math.max(0, raw));
+  }
+
+  // ---------- Dino (world coordinates) ----------
   const dino = {
-    x: 40,
-    y: groundY - 40,
+    x: 40, // world x
+    y: 0,  // set in reset
     w: 40,
     h: 40,
     vy: 0,
-    jumpForce: -14,
+    jumpForce: -15,
     grounded: true,
-    draw() {
-      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--dino').trim() || '#222';
-      roundRect(ctx, this.x, this.y, this.w, this.h, 6);
-      // eye
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(this.x + 28, this.y + 10, 6, 6);
-    },
     update() {
       this.vy += gravity;
       this.y += this.vy;
-      if (this.y + this.h >= groundY) {
-        this.y = groundY - this.h;
+      if (this.y + this.h >= groundY()) {
+        this.y = groundY() - this.h;
         this.vy = 0;
         this.grounded = true;
       } else {
         this.grounded = false;
+      }
+      if (running && !isPaused) {
+        this.x += Number(gameSpeed) || 0;
       }
     },
     jump() {
@@ -54,32 +109,42 @@
         this.vy = this.jumpForce;
         this.grounded = false;
       }
+    },
+    reset() {
+      this.x = 40;
+      this.y = groundY() - this.h;
+      this.vy = 0;
+      this.grounded = true;
+    },
+    draw() {
+      const screenX = CAMERA_OFFSET_X;
+      const color = (getComputedStyle(document.documentElement).getPropertyValue('--dino') || '#222').trim() || '#222';
+      ctx.fillStyle = color;
+      roundRect(ctx, screenX, this.y, this.w, this.h, 6);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(screenX + 28, this.y + 10, 6, 6);
     }
   };
 
+  // ---------- Obstacles (stationary world positions) ----------
   class Obstacle {
-    constructor(speed) {
-      this.w = (Math.random() > 0.6) ? 30 + Math.floor(Math.random()*30) : 20 + Math.floor(Math.random()*15);
-      this.h = 20 + Math.floor(Math.random()*30);
-      this.x = W + 20;
-      this.y = groundY - this.h;
-      this.speed = speed;
+    constructor(worldX) {
+      this.w = (Math.random() > 0.6) ? 30 + Math.floor(Math.random() * 30) : 20 + Math.floor(Math.random() * 15);
+      this.h = 20 + Math.floor(Math.random() * 30);
+      this.worldX = Number(worldX);
+      this.y = groundY() - this.h;
     }
-    update() {
-      this.x -= this.speed;
-    }
-    draw() {
-      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--obstacle').trim() || '#333';
-      roundRect(ctx, this.x, this.y, this.w, this.h, 4);
-    }
-    offscreen() {
-      return this.x + this.w < 0;
+    draw(dinoWorldX) {
+      const screenX = this.worldX - (dinoWorldX - CAMERA_OFFSET_X);
+      const color = (getComputedStyle(document.documentElement).getPropertyValue('--obstacle') || '#333').trim() || '#333';
+      ctx.fillStyle = color;
+      roundRect(ctx, screenX, this.y, this.w, this.h, 4);
     }
   }
 
   const obstacles = [];
 
-  // Utility: rounded rectangle
+  // ---------- Utilities ----------
   function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -95,142 +160,245 @@
     ctx.fill();
   }
 
-  // Collision check (AABB)
   function collides(a, b) {
-    return a.x < b.x + b.w &&
-           a.x + a.w > b.x &&
+    return a.x < b.worldX + b.w &&
+           a.x + a.w > b.worldX &&
            a.y < b.y + b.h &&
            a.y + a.h > b.y;
   }
 
-  // Reset game
-  function resetGame() {
+  // ---------- Obstacle generation ----------
+  function generateNextObstacle() {
+    let last = dino.x + 200;
+    if (obstacles.length > 0) {
+      last = obstacles[obstacles.length - 1].worldX;
+    }
+    const gap = computeGapForSpeed(gameSpeed);
+    const nextX = last + gap + Math.floor(Math.random() * 60) - 30;
+    obstacles.push(new Obstacle(nextX));
+  }
+
+  function populateInitialObstacles() {
     obstacles.length = 0;
-    gameSpeed = 6;
-    spawnInterval = 90;
+    let cursor = dino.x + 200;
+    const initialCount = 9 + INITIAL_EXTRA_OBSTACLES; // denser start
+    for (let i = 0; i < initialCount; i++) {
+      const gap = computeGapForSpeed(gameSpeed);
+      cursor += gap + Math.floor(Math.random() * 40) - 20;
+      obstacles.push(new Obstacle(cursor));
+    }
+    for (let i = 0; i < 4; i++) {
+      const gap = computeGapForSpeed(gameSpeed) + 200 + Math.floor(Math.random() * 300);
+      cursor += gap;
+      obstacles.push(new Obstacle(cursor));
+    }
+  }
+
+  // ---------- Reset / Restart ----------
+  function resetGame() {
+    resizeCanvasToDisplaySize();
     frame = 0;
     score = 0;
     running = true;
-    dino.y = groundY - dino.h;
-    dino.vy = 0;
+    isPaused = false;
     godMode = false;
+    gameSpeed = baseSpeed;
+    dino.reset();
+    populateInitialObstacles();
+    recalcLayout();
     updateHUD();
   }
 
+  function restart() { resetGame(); }
+
+  // ---------- HUD ----------
   function updateHUD() {
     scoreEl.textContent = Math.floor(score);
-    speedEl.textContent = Math.floor(gameSpeed);
+    speedEl.textContent = Math.max(0, Math.floor(gameSpeed));
     godStateEl.textContent = godMode ? 'ON' : 'OFF';
-    document.getElementById('godBadge').style.border = godMode ? '2px solid #4caf50' : '1px solid #ddd';
+    const badge = document.getElementById('godBadge');
+    if (badge) badge.style.border = godMode ? '2px solid #4caf50' : '1px solid #ddd';
   }
 
-  // Input
-  window.addEventListener('keydown', (e) => {
+  // ---------- Input ----------
+  function handleJumpKey(e) {
     if (e.code === 'Space' || e.code === 'ArrowUp') {
-      dino.jump();
       e.preventDefault();
-    } else if (e.key.toLowerCase() === 'g') {
-      godMode = !godMode;
-      updateHUD();
-    } else if (e.key.toLowerCase() === 'p') {
-      running = !running; // pause/unpause
+      dino.jump();
+    }
+  }
+
+  window.addEventListener('keydown', (e) => {
+    const key = e.key.toLowerCase();
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      handleJumpKey(e);
+    } else if (key === 'g') {
+      godMode = !godMode; updateHUD();
+    } else if (key === 'p') {
+      isPaused = !isPaused;
+    } else if (key === 'r') {
+      restart();
     }
   });
 
-  restartBtn.addEventListener('click', () => resetGame());
+  let lastTap = 0;
+  canvas.addEventListener('touchstart', (ev) => {
+    ev.preventDefault();
+    const now = Date.now();
+    if (now - lastTap < 300) { godMode = !godMode; updateHUD(); }
+    else dino.jump();
+    lastTap = now;
+  }, { passive: false });
 
-  // Game Loop
+  canvas.addEventListener('pointerdown', (ev) => {
+    if (!running) restart(); else dino.jump();
+  });
+
+  if (restartBtn) restartBtn.addEventListener('click', restart);
+
+  // ---------- Game loop ----------
   function loop() {
-    if (running) {
+    if (!isPaused && running) {
       frame++;
-      // spawn obstacles
-      if (frame % Math.max(20, Math.floor(spawnInterval)) === 0) {
-        obstacles.push(new Obstacle(gameSpeed + Math.random()*2));
-      }
-
-      // increase difficulty gradually
-      if (frame % 300 === 0) {
-        gameSpeed += 0.6;
-        spawnInterval = Math.max(40, spawnInterval - 4);
-      }
-
-      // update
       dino.update();
-      obstacles.forEach(o => o.update());
-      // remove offscreen
-      for (let i = obstacles.length - 1; i >= 0; i--) {
-        if (obstacles[i].offscreen()) obstacles.splice(i,1);
-      }
 
-      // score increases with time and speed
-      score += 0.1 * gameSpeed;
+      // dynamic obstacle spawning with buffer size dependent on speed
+      const extraObstacles = computeExtraObstacles(gameSpeed);
+      const desiredBuffer = BASE_OBSTACLE_BUFFER + extraObstacles + INITIAL_EXTRA_OBSTACLES;
 
-      // collision detection (skip if godMode)
-      if (!godMode) {
-        for (let o of obstacles) {
-          if (collides(dino, o)) {
-            running = false;
-            flashGame();
-          }
+      const aheadCount = obstacles.filter(o => o.worldX > dino.x).length;
+
+      if (aheadCount < desiredBuffer + 1) {
+        const toGenerate = (desiredBuffer + 1) - aheadCount;
+        for (let i = 0; i < toGenerate; i++) generateNextObstacle();
+      } else {
+        const farthest = obstacles.length ? obstacles[obstacles.length - 1].worldX : dino.x;
+        const threshold = dino.x + computeGapForSpeed(gameSpeed) * (desiredBuffer + 0.5);
+        if (farthest < threshold) {
+          const baseGen = 1;
+          const bonusProb = Math.min(0.6, extraObstacles * 0.15);
+          const bonus = Math.random() < bonusProb ? 1 : 0;
+          const genCount = baseGen + bonus;
+          for (let i = 0; i < genCount; i++) generateNextObstacle();
         }
       }
 
-      // render
-      draw();
-      updateHUD();
-    } else {
-      draw(true);
+      // score
+      score = Math.max(score, Math.floor((dino.x - 40) * 0.3));
+
+      // difficulty ramp: every N frames speed up a bit AND spawn extra obstacles on level-up
+      if (frame % 800 === 0) {
+        const oldSpeed = gameSpeed;
+        gameSpeed = Number(gameSpeed) + 0.9; // slightly larger jump on level-up
+        // spawn a small number of extra obstacles immediately to reflect level-up
+        const extraOnLevel = Math.min(3, computeExtraObstacles(gameSpeed) - computeExtraObstacles(oldSpeed) + 1);
+        for (let i = 0; i < extraOnLevel; i++) generateNextObstacle();
+      }
+
+      // collision detection
+      if (!godMode) {
+        for (const o of obstacles) {
+          if (collides(dino, o)) {
+            running = false;
+            flashGame();
+            break;
+          }
+        }
+      }
     }
 
+    draw(!running);
+    updateHUD();
     requestAnimationFrame(loop);
   }
 
-  function draw(gameOver=false) {
-    ctx.clearRect(0,0,W,H);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ground').trim() || '#666';
-    ctx.fillRect(0, groundY, W, H - groundY);
-    obstacles.forEach(o => o.draw());
-    dino.draw();
-    if (gameOver) {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      ctx.fillRect(W/2 - 160, H/2 - 40, 320, 80);
-      ctx.fillStyle = '#fff';
-      ctx.font = '18px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Game Over — Press Restart to play again', W/2, H/2 + 6);
-      ctx.textAlign = 'start';
+  function draw(gameOver = false) {
+    resizeCanvasToDisplaySize();
+    const W = CSS_W();
+    const H = CSS_H();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // ground
+    const groundColor = (getComputedStyle(document.documentElement).getPropertyValue('--ground') || '#666').trim() || '#666';
+    ctx.fillStyle = groundColor;
+    ctx.fillRect(0, groundY(), W, H - groundY());
+
+    // draw obstacles (map worldX -> screenX)
+    for (const o of obstacles) {
+      const screenX = o.worldX - (dino.x - CAMERA_OFFSET_X);
+      if (screenX + o.w < -100 || screenX > W + 100) continue;
+      o.draw(dino.x);
     }
+
+    // draw dino
+    dino.draw();
+
+    // god indicator
     if (godMode) {
       ctx.fillStyle = '#4caf50';
       ctx.beginPath();
-      ctx.arc(W - 30, 30, 12, 0, Math.PI*2);
+      ctx.arc(W - 30, 30, 12, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('G', W - 30, 35);
+      ctx.fillText('😈', W - 30, 35);
+      ctx.textAlign = 'start';
+    }
+
+    // overlay
+    if (gameOver) {
+      const collisionHappened = !godMode && obstacles.some(o => collides(dino, o));
+      const msg = collisionHappened ? 'Game Over — collision!' : 'Run Finished';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(W / 2 - 200, H / 2 - 40, 400, 80);
+      ctx.fillStyle = '#fff';
+      ctx.font = '18px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(msg + ' — Press Restart (R) or button to play again', W / 2, H / 2 + 6);
       ctx.textAlign = 'start';
     }
   }
 
   function flashGame() {
-    const original = canvas.style.boxShadow;
+    const original = canvas.style.boxShadow || '';
     canvas.style.boxShadow = '0 0 0 6px rgba(255,0,0,0.15)';
     setTimeout(() => canvas.style.boxShadow = original, 300);
   }
 
-  // Start
+  // ---------- Start ----------
   resetGame();
   loop();
 
-  // Expose safe API
+  // ---------- Public API ----------
   window.DINO_CLONE = {
     setGodMode(v) { godMode = !!v; updateHUD(); },
     toggleGodMode() { godMode = !godMode; updateHUD(); },
-    setSpeed(v) { gameSpeed = Number(v); updateHUD(); },
-    setGravity(v) { gravity = Number(v); },
-    addObstacle() { obstacles.push(new Obstacle(gameSpeed)); },
-    getState() { return { gameSpeed, spawnInterval, gravity, godMode, score: Math.floor(score) }; }
+    setSpeed(v) {
+      const n = Number(v);
+      if (isFinite(n) && n >= 0) {
+        gameSpeed = n;
+        updateHUD();
+      }
+    },
+    addObstacleAt(x) {
+      const n = Number(x);
+      if (isFinite(n)) obstacles.push(new Obstacle(n));
+    },
+    restart,
+    getState() {
+      return {
+        baseSpeed,
+        gameSpeed,
+        gravity,
+        score: Math.floor(score),
+        running,
+        paused: isPaused,
+        dinoX: dino.x,
+        obstacleCount: obstacles.length,
+        extraObstacles: computeExtraObstacles(gameSpeed)
+      };
+    }
   };
 
 })();
