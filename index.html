@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Dino Clone - Local (Separated)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-wrap">
+    <canvas id="game" width="800" height="200"></canvas>
+    <div class="info">
+      <div class="left">
+        <span class="badge">Score: <span id="score">0</span></span>
+        <span class="badge">Speed: <span id="speed">6</span></span>
+        <span style="margin-left:10px" class="hint">Jump: Space / Up Arrow, Toggle God Mode: G</span>
+      </div>
+      <div class="right">
+        <button id="restartBtn">Restart</button>
+        <div class="badge" id="godBadge">God mode: <strong id="godState">OFF</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
