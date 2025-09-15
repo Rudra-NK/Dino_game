@@ -48,7 +48,7 @@
   const restartBtn = document.getElementById('restartBtn');
 
   // ---------- Game state ----------
-  const baseSpeed = 4;      // base starting speed
+  const baseSpeed = 3;      // base starting speed
   let gameSpeed = baseSpeed;      // dino forward speed (css px per frame)
   let gravity = 0.68;
   let frame = 0;
