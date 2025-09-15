@@ -244,6 +244,8 @@
       isPaused = !isPaused;
     } else if (key === 'r') {
       restart();
+    } else if (key === 's') {
+      startGame();
     }
   });
 
