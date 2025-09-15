@@ -1,9 +1,7 @@
-// game.js — Modified: more obstacles overall, denser start, density increases with speed
+// game.js — Full file with high-speed easing and Start button support
 (() => {
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  document.getElementById('startBtn').addEventListener('click', startGame);
-
 
   // ---------- DPI / canvas ----------
   function resizeCanvasToDisplaySize() {
@@ -46,43 +44,64 @@
   const speedEl = document.getElementById('speed');
   const godStateEl = document.getElementById('godState');
   const restartBtn = document.getElementById('restartBtn');
+  const startBtn = document.getElementById('startBtn'); // optional
 
   // ---------- Game state ----------
   const baseSpeed = 3;      // base starting speed
   let gameSpeed = baseSpeed;      // dino forward speed (css px per frame)
-  let gravity = 0.68;
+  let gravity = 0.68
   let frame = 0;
   let score = 0;
-  let running = true;
+  let running = false;      // start in not-running; startGame toggles
   let isPaused = false;
   let godMode = false;
+  let started = false;      // whether player pressed Start (if startBtn exists)
 
-  // ---------- Obstacle/gap tuning (MAJOR changes: denser overall) ----------
-  // We use a formula that *reduces* gap as a function of speed (smaller gaps => more obstacles).
-  const GAP_BASE = 500;               // base gap (px) at baseSpeed (smaller => denser)
-  const GAP_REDUCTION_PER_SPEED = 45; // how much gap reduces per additional speed unit
-  const GAP_RANDOM_JITTER = 160;      // random jitter added/subtracted
-  const GAP_MIN = 160;                // minimum gap allowed (prevents overlap)
-  const GAP_MAX = 2500;               // safety cap
+  // ---------- High-speed easing & obstacle tuning ----------
+  const GAP_BASE = 600;           // base gap in px at baseSpeed
+  const GAP_PER_SPEED = 150;      // extra px added per speed unit above baseSpeed
+  const GAP_RANDOM_JITTER = 200;  // random jitter range
+  const GAP_MIN = 300;
+  const GAP_MAX = 3000;
 
-  // obstacle-count-with-speed tuning
-  const SPEED_LEVEL = 1.0;            // every 1.0 speed units => +1 extra obstacle
-  const MAX_EXTRA_OBSTACLES = 8;      // allow more obstacles at high speed
-  const BASE_OBSTACLE_BUFFER = 4;     // base number of gaps ahead to keep
-  const INITIAL_EXTRA_OBSTACLES = 6;  // initial extra obstacles to start denser
+  // high-speed easing settings
+  const HIGH_SPEED_THRESHOLD = 12;     // above this speed we begin easing
+  const HIGH_SPEED_GAP_MULTIPLIER = 0.20; // +20% gap at extreme
+  const HIGH_SPEED_REDUCTION_RATE = 2.0;  // every 2 speed units above threshold reduce 1 extra obstacle
+
+  // how speed maps to extra obstacles
+  const SPEED_LEVEL = 1.0;        // every 1.0 speed units => +1 extra obstacle
+  const MAX_EXTRA_OBSTACLES = 6;  // cap extra obstacles
+  const BASE_OBSTACLE_BUFFER = 4; // base desired number of gaps ahead
+  const INITIAL_EXTRA_OBSTACLES = 6; // denser start
 
   function computeGapForSpeed(speed) {
-    // reduce gap as speed increases: gap = base - reduction*(speed - baseSpeed) + jitter
-    const reduction = Math.max(0, speed - baseSpeed) * GAP_REDUCTION_PER_SPEED;
-    const jitter = Math.floor((Math.random() - 0.5) * GAP_RANDOM_JITTER); // +/- jitter
-    let gap = GAP_BASE - reduction + jitter;
-    gap = Math.max(GAP_MIN, Math.min(GAP_MAX, Math.floor(gap)));
+    // base: grows with speed (so faster -> further apart by default)
+    const extra = Math.max(0, speed - baseSpeed) * GAP_PER_SPEED;
+    const jitter = Math.floor(Math.random() * GAP_RANDOM_JITTER);
+    let gap = GAP_BASE + extra + jitter;
+
+    // But at very high speeds gently increase gap further (easing)
+    if (speed > HIGH_SPEED_THRESHOLD) {
+      const over = speed - HIGH_SPEED_THRESHOLD;
+      const mult = 1 + Math.min(1.0, (over / HIGH_SPEED_THRESHOLD) * HIGH_SPEED_GAP_MULTIPLIER);
+      gap = Math.floor(gap * mult);
+    }
+
+    gap = Math.max(GAP_MIN, Math.min(GAP_MAX, gap));
     return gap;
   }
 
   function computeExtraObstacles(speed) {
-    const raw = Math.floor((Math.max(0, speed - baseSpeed)) / SPEED_LEVEL);
-    return Math.min(MAX_EXTRA_OBSTACLES, Math.max(0, raw));
+    const raw = Math.floor(Math.max(0, speed - baseSpeed) / SPEED_LEVEL);
+    // If above threshold, reduce raw extra gradually
+    if (speed > HIGH_SPEED_THRESHOLD) {
+      const overUnits = speed - HIGH_SPEED_THRESHOLD;
+      const reduceBy = Math.floor(overUnits / HIGH_SPEED_REDUCTION_RATE);
+      const adjusted = Math.max(0, raw - reduceBy);
+      return Math.min(MAX_EXTRA_OBSTACLES, adjusted);
+    }
+    return Math.min(MAX_EXTRA_OBSTACLES, raw);
   }
 
   // ---------- Dino (world coordinates) ----------
@@ -92,7 +111,7 @@
     w: 40,
     h: 40,
     vy: 0,
-    jumpForce: -15,
+    jumpForce: -16,
     grounded: true,
     update() {
       this.vy += gravity;
@@ -112,6 +131,10 @@
       if (this.grounded) {
         this.vy = this.jumpForce;
         this.grounded = false;
+        // optional: play soundJump if defined elsewhere
+        if (typeof soundJump !== 'undefined') {
+          try { soundJump.currentTime = 0; soundJump.play(); } catch(e) {}
+        }
       }
     },
     reset() {
@@ -166,14 +189,14 @@
 
   function collides(a, b) {
     return a.x < b.worldX + b.w &&
-      a.x + a.w > b.worldX &&
-      a.y < b.y + b.h &&
-      a.y + a.h > b.y;
+           a.x + a.w > b.worldX &&
+           a.y < b.y + b.h &&
+           a.y + a.h > b.y;
   }
 
   // ---------- Obstacle generation ----------
   function generateNextObstacle() {
-    let last = dino.x + 150;
+    let last = dino.x + 200;
     if (obstacles.length > 0) {
       last = obstacles[obstacles.length - 1].worldX;
     }
@@ -184,8 +207,8 @@
 
   function populateInitialObstacles() {
     obstacles.length = 0;
-    let cursor = dino.x + 150;
-    const baseInitial = 10; // base number at start (bump it up)
+    let cursor = dino.x + 200;
+    const baseInitial = 10; // base number at start
     const initialCount = baseInitial + INITIAL_EXTRA_OBSTACLES; // denser beginning
     for (let i = 0; i < initialCount; i++) {
       const gap = computeGapForSpeed(gameSpeed);
@@ -200,7 +223,7 @@
     }
   }
 
-  // ---------- Reset / Restart ----------
+  // ---------- Reset / Start / Restart ----------
   function resetGame() {
     resizeCanvasToDisplaySize();
     frame = 0;
@@ -215,7 +238,29 @@
     updateHUD();
   }
 
-  function restart() { resetGame(); }
+  function restart() {
+    resetGame();
+  }
+
+  function startGame() {
+    if (started) return;
+    started = true;
+    if (startBtn) startBtn.style.display = 'none';
+    resetGame();
+    // start loop if not already running
+    if (!rafRequested) {
+      rafRequested = true;
+      loop();
+    }
+  }
+
+  // If no startBtn present, auto-start
+  if (!startBtn) {
+    startGame();
+  } else {
+    // attach start handler
+    startBtn.addEventListener('click', startGame);
+  }
 
   // ---------- HUD ----------
   function updateHUD() {
@@ -249,23 +294,32 @@
     }
   });
 
+  // touch: tap => jump; double-tap toggles god mode
   let lastTap = 0;
   canvas.addEventListener('touchstart', (ev) => {
     ev.preventDefault();
     const now = Date.now();
-    if (now - lastTap < 300) { godMode = !godMode; updateHUD(); }
-    else dino.jump();
+    if (now - lastTap < 300) {
+      godMode = !godMode;
+      updateHUD();
+    } else {
+      dino.jump();
+    }
     lastTap = now;
   }, { passive: false });
 
+  // pointer: click to jump; if run over, click restarts
   canvas.addEventListener('pointerdown', (ev) => {
-    if (!running) restart(); else dino.jump();
+    if (!running) restart();
+    else dino.jump();
   });
 
   if (restartBtn) restartBtn.addEventListener('click', restart);
 
   // ---------- Game loop ----------
+  let rafRequested = false;
   function loop() {
+    rafRequested = true;
     if (!isPaused && running) {
       frame++;
       dino.update();
@@ -285,9 +339,8 @@
         const farthest = obstacles.length ? obstacles[obstacles.length - 1].worldX : dino.x;
         const threshold = dino.x + computeGapForSpeed(gameSpeed) * Math.max(1, desiredBuffer * 0.9);
         if (farthest < threshold) {
-          // produce 1-2 obstacles, with slightly higher chance for extra when speed is higher
           const baseGen = 1;
-          const bonusProb = Math.min(0.85, extraObstacles * 0.15 + 0.15); // higher speed -> higher chance
+          const bonusProb = Math.min(0.85, extraObstacles * 0.15 + 0.15);
           const bonus = Math.random() < bonusProb ? 1 : 0;
           const genCount = baseGen + bonus;
           for (let i = 0; i < genCount; i++) generateNextObstacle();
@@ -300,7 +353,7 @@
       // difficulty ramp: every N frames speed up a bit and spawn a few extras to reflect level up
       if (frame % 800 === 0) {
         const oldSpeed = gameSpeed;
-        gameSpeed = Number(gameSpeed) + 1.0; // stronger increase
+        gameSpeed = Number(gameSpeed) + 0.9; // small bump
         // spawn a small burst of obstacles on level-up
         const extraOnLevel = Math.min(4, computeExtraObstacles(gameSpeed) - computeExtraObstacles(oldSpeed) + 1);
         for (let i = 0; i < extraOnLevel; i++) generateNextObstacle();
@@ -311,6 +364,10 @@
         for (const o of obstacles) {
           if (collides(dino, o)) {
             running = false;
+            // optional hit sound if defined
+            if (typeof soundHit !== 'undefined') {
+              try { soundHit.currentTime = 0; soundHit.play(); } catch(e) {}
+            }
             flashGame();
             break;
           }
@@ -346,14 +403,14 @@
 
     // god indicator
     if (godMode) {
-      ctx.fillStyle = '#e76969ff';
+      ctx.fillStyle = '#4caf50';
       ctx.beginPath();
       ctx.arc(W - 30, 30, 12, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('😈', W - 30, 35);
+      ctx.fillText('G', W - 30, 35);
       ctx.textAlign = 'start';
     }
 
@@ -377,18 +434,12 @@
     setTimeout(() => canvas.style.boxShadow = original, 300);
   }
 
-  // ---------- Start ----------
-  let started = false;
-
-  function startGame() {
-    if (!started) {
-      started = true;
-      document.getElementById('startBtn').style.display = 'none';
-      resetGame();
-      loop();
-    }
+  // ---------- Start initial state: show Start button if present ----------
+  // If startBtn exists we show it and wait; otherwise start immediately (startGame() above already handles)
+  if (startBtn) {
+    // Make sure start button is visible
+    startBtn.style.display = 'block';
   }
-
 
   // ---------- Public API ----------
   window.DINO_CLONE = {
@@ -406,6 +457,7 @@
       if (isFinite(n)) obstacles.push(new Obstacle(n));
     },
     restart,
+    startGame,
     getState() {
       return {
         baseSpeed,
