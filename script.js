@@ -63,8 +63,8 @@
   let started = false;      // whether player pressed Start (if startBtn exists)
 
   // ---------- High-speed easing & obstacle tuning ----------
-  const GAP_BASE = 600;           // base gap in px at baseSpeed
-  const GAP_PER_SPEED = 150;      // extra px added per speed unit above baseSpeed
+  const GAP_BASE = 450;           // base gap in px at baseSpeed
+  const GAP_PER_SPEED = 130;      // extra px added per speed unit above baseSpeed
   const GAP_RANDOM_JITTER = 200;  // random jitter range
   const GAP_MIN = 300;
   const GAP_MAX = 3000;
@@ -75,10 +75,10 @@
   const HIGH_SPEED_REDUCTION_RATE = 2.0;  // every 2 speed units above threshold reduce 1 extra obstacle
 
   // how speed maps to extra obstacles
-  const SPEED_LEVEL = 1.0;        // every 1.0 speed units => +1 extra obstacle
-  const MAX_EXTRA_OBSTACLES = 6;  // cap extra obstacles
+  const SPEED_LEVEL = 0.7;        // every 1.0 speed units => +1 extra obstacle
+  const MAX_EXTRA_OBSTACLES = 5;  // cap extra obstacles
   const BASE_OBSTACLE_BUFFER = 4; // base desired number of gaps ahead
-  const INITIAL_EXTRA_OBSTACLES = 6; // denser start
+  const INITIAL_EXTRA_OBSTACLES = 7; // denser start
 
   function computeGapForSpeed(speed) {
     // base: grows with speed (so faster -> further apart by default)
@@ -219,7 +219,7 @@
   function populateInitialObstacles() {
     obstacles.length = 0;
     let cursor = dino.x + 200;
-    const baseInitial = 10; // base number at start
+    const baseInitial = 12; // base number at start
     const initialCount = baseInitial + INITIAL_EXTRA_OBSTACLES; // denser beginning
     for (let i = 0; i < initialCount; i++) {
       const gap = computeGapForSpeed(gameSpeed);
@@ -377,11 +377,11 @@
 
 
       // difficulty ramp: every N frames speed up a bit and spawn a few extras to reflect level up
-      if (frame % 800 === 0) {
+      if (frame % 750 === 0) {
         const oldSpeed = gameSpeed;
-        gameSpeed = Number(gameSpeed) + 0.9; // small bump
+        gameSpeed = Number(gameSpeed) + 0.65; // small bump
         // spawn a small burst of obstacles on level-up
-        const extraOnLevel = Math.min(4, computeExtraObstacles(gameSpeed) - computeExtraObstacles(oldSpeed) + 1);
+        const extraOnLevel = Math.min(6, computeExtraObstacles(gameSpeed) - computeExtraObstacles(oldSpeed) + 1);
         for (let i = 0; i < extraOnLevel; i++) generateNextObstacle();
       }
 
