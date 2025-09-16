@@ -44,14 +44,19 @@
   const speedEl = document.getElementById('speed');
   const godStateEl = document.getElementById('godState');
   const restartBtn = document.getElementById('restartBtn');
-  const startBtn = document.getElementById('startBtn'); // optional
+  const startBtn = document.getElementById('startBtn');
+  const soundJump = document.getElementById('soundJump');
+  const soundHit = document.getElementById('soundHit');
+  const soundScore = document.getElementById('soundScore');
+  // optional
 
   // ---------- Game state ----------
   const baseSpeed = 3;      // base starting speed
   let gameSpeed = baseSpeed;      // dino forward speed (css px per frame)
-  let gravity = 0.68
+  let gravity = 0.65;
   let frame = 0;
   let score = 0;
+  let lastScoreMilestone = 0;
   let running = false;      // start in not-running; startGame toggles
   let isPaused = false;
   let godMode = false;
@@ -132,9 +137,15 @@
         this.vy = this.jumpForce;
         this.grounded = false;
         // optional: play soundJump if defined elsewhere
-        if (typeof soundJump !== 'undefined') {
-          try { soundJump.currentTime = 0; soundJump.play(); } catch(e) {}
+        if (soundJump) {
+          try {
+            soundJump.currentTime = 0;
+            soundJump.volume = 0.6; // optional: 0.0 - 1.0
+            const p = soundJump.play();
+            if (p && p.catch) p.catch(() => { }); // swallow promise rejection if browser blocks
+          } catch (e) { }
         }
+
       }
     },
     reset() {
@@ -189,9 +200,9 @@
 
   function collides(a, b) {
     return a.x < b.worldX + b.w &&
-           a.x + a.w > b.worldX &&
-           a.y < b.y + b.h &&
-           a.y + a.h > b.y;
+      a.x + a.w > b.worldX &&
+      a.y < b.y + b.h &&
+      a.y + a.h > b.y;
   }
 
   // ---------- Obstacle generation ----------
@@ -228,6 +239,7 @@
     resizeCanvasToDisplaySize();
     frame = 0;
     score = 0;
+    lastScoreMilestone = 0;
     running = true;
     isPaused = false;
     godMode = false;
@@ -349,6 +361,20 @@
 
       // score
       score = Math.max(score, Math.floor((dino.x - 40) * 0.3));
+      // Play milestone sound at 1000, 2000, 3000... only once per milestone
+      if (soundScore) {
+        const milestoneNumber = Math.floor(score / 1000);
+        if (milestoneNumber > 0 && milestoneNumber !== lastScoreMilestone) {
+          try {
+            soundScore.currentTime = 0;
+            soundScore.volume = 0.7;
+            const p = soundScore.play();
+            if (p && p.catch) p.catch(() => { });
+          } catch (e) { }
+          lastScoreMilestone = milestoneNumber;
+        }
+      }
+
 
       // difficulty ramp: every N frames speed up a bit and spawn a few extras to reflect level up
       if (frame % 800 === 0) {
@@ -365,9 +391,15 @@
           if (collides(dino, o)) {
             running = false;
             // optional hit sound if defined
-            if (typeof soundHit !== 'undefined') {
-              try { soundHit.currentTime = 0; soundHit.play(); } catch(e) {}
+            if (soundHit) {
+              try {
+                soundHit.currentTime = 0;
+                soundHit.volume = 0.8;
+                const p = soundHit.play();
+                if (p && p.catch) p.catch(() => { });
+              } catch (e) { }
             }
+
             flashGame();
             break;
           }
@@ -403,14 +435,14 @@
 
     // god indicator
     if (godMode) {
-      ctx.fillStyle = '#4caf50';
+      ctx.fillStyle = '#ae2c2cff';
       ctx.beginPath();
       ctx.arc(W - 30, 30, 12, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('G', W - 30, 35);
+      ctx.fillText('😈', W - 30, 35);
       ctx.textAlign = 'start';
     }
 
